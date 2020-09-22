@@ -1,10 +1,8 @@
 import handleIPC from "./ipc";
-// import main from "./window/main.js";
-// let { create: createMainWindow } = main;
+import main from "./window/main.js";
 import robot from "./robot";
 
-import control from "./window/control.js";
-let { create: createMainWindow } = control;
+let { create: createMainWindow } = main;
 
 export default function() {
   createMainWindow();

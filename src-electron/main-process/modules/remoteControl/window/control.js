@@ -13,6 +13,10 @@ function create() {
   win.loadURL(process.env.APP_URL + "/#/remote-control/control");
 }
 
+function send(channel, ...args) {
+  win.webContents.send(channel, ...args);
+}
 export default {
-  create
+  create,
+  send
 };

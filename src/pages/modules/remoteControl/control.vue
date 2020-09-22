@@ -4,49 +4,58 @@
 
 <script>
 import { desktopCapturer, ipcRenderer } from "electron";
+import ipc from "app/src-electron/main-process/modules/remoteControl/ipc";
+
+const pc = new window.RTCPeerConnection({});
 
 export default {
+  data() {
+    return {
+      candidates: [] // 需要添加ice 的 任务队列
+    };
+  },
   mounted() {
-    // 获取视频流
-    this.getScreenStream();
-    // 监听控制端操作
-    window.onkeydown = this.keyDownhandle;
-    window.onmouseup = this.mouseupHandle;
-    this.$once("hook:beforeDestroy", () => {
-      window.onkeydown = null;
-      window.onmouseup = null;
+    // this.localScreen();
+    this.getRemoteScreenStream();
+    this.createIceData();
+
+    ipcRenderer.on("answer", (e, answer) => {
+      this.setRemote(answer);
     });
   },
   methods: {
+    // 正式使用
+    getRemoteScreenStream() {
+      window.setRemote = this.setRemote;
+      this.createOffer().then(offer => {
+        ipcRenderer.send("forward", "offer", {
+          type: offer.type,
+          sdp: offer.sdp
+        });
+      });
+      pc.onaddstream = e => {
+        this.play(e.steam);
+      };
+      this.$once("hook:beforeDestroy", () => {
+        pc.onaddstream = null;
+      });
+    },
+    // 仅测试使用
+    localScreen() {
+      // 监听控制端操作;
+      window.onkeydown = this.keyDownhandle;
+      window.onmouseup = this.mouseupHandle;
+      this.$once("hook:beforeDestroy", () => {
+        window.onkeydown = null;
+        window.onmouseup = null;
+      });
+    },
     // 播放视频流
     play(stream) {
       this.$refs.video.srcObject = stream;
       this.$refs.video.onloadeddata = () => {
         this.$refs.video.play();
       };
-    },
-    // 获取视频流
-    async getScreenStream() {
-      const sources = await desktopCapturer.getSources({ types: ["screen"] });
-      navigator.webkitGetUserMedia(
-        {
-          audio: false,
-          video: {
-            mandatory: {
-              chromeMediaSource: "desktop",
-              chromeMediaSourceId: sources[0].id,
-              maxWidth: window.screen.width,
-              maxHeight: window.screen.height
-            }
-          }
-        },
-        stream => {
-          this.play(stream);
-        },
-        err => {
-          console.error(err);
-        }
-      );
     },
     // 键盘监听
     keyDownhandle(e) {
@@ -76,6 +85,50 @@ export default {
       };
       // 传输到主进程
       ipcRenderer.send("robot", "mouse", data);
+    },
+
+    /**
+     * 控制端逻辑
+     */
+    // 创建offer
+    async createOffer() {
+      const offer = pc.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: true
+      });
+      await pc.setLocalDescription(offer);
+      console.log("offer", JSON.stringify(pc.localDescription));
+      return pc.localDescription;
+    },
+    // 接收远程 answer
+    async setRemote(answer) {
+      await pc.setRemoteDescription(answer);
+    },
+    /**
+     * stun 逻辑
+     */
+    createIceData() {
+      this.candidates = [];
+      pc.onicecandidate = function(e) {
+        if (e.candidate) {
+          ipcRenderer.send("forward", "control-candidate", e.candidate);
+        }
+      };
+      ipcRenderer.on("candidate", (e, candidate) => {
+        this.addIceCandidate(candidate);
+      });
+    },
+    async addIceCandidate(candidate) {
+      if (candidate) {
+        this.candidates.push(candidate);
+      }
+      // 接收到远程 answer 后， 才可以添加ice
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        for (let i = 0; i < this.candidates.length; i++) {
+          await pc.addIceCandidate(new RTCIceCandidate(this.candidates[i]));
+        }
+        this.candidates = [];
+      }
     }
   }
 };
